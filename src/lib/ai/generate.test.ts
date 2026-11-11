@@ -308,3 +308,145 @@ describe('generateReply — OpenAI-compatible', () => {
     expect(fetchMock.mock.calls[0][1].redirect).toBe('manual')
   })
 })
+
+describe('generateReply — Gemini', () => {
+  it('calls the generateContent endpoint and returns the reply', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        candidates: [{ content: { parts: [{ text: 'Hello from Gemini!' }] } }],
+        usageMetadata: {
+          promptTokenCount: 20,
+          candidatesTokenCount: 5,
+          totalTokenCount: 25,
+        },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await generateReply({
+      config: config({ provider: 'gemini', model: 'gemini-2.0-flash', apiKey: 'AIza-test' }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Hi' }],
+    })
+
+    expect(res).toEqual({
+      text: 'Hello from Gemini!',
+      handoff: false,
+      usage: { promptTokens: 20, completionTokens: 5, totalTokens: 25 },
+    })
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toContain('generativelanguage.googleapis.com')
+    expect(url).toContain('gemini-2.0-flash')
+    expect(url).toContain(':generateContent')
+    expect(opts.headers.Authorization).toBe('Bearer AIza-test')
+  })
+
+  it('sends system_instruction and maps assistant → model role', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        okResponse({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateReply({
+      config: config({ provider: 'gemini', model: 'gemini-2.0-flash' }),
+      systemPrompt: 'Be helpful',
+      messages: [
+        { role: 'user', content: 'Hello' },
+        { role: 'assistant', content: 'Hi there!' },
+        { role: 'user', content: 'How are you?' },
+      ],
+    })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.system_instruction.parts[0].text).toBe('Be helpful')
+    // assistant → model
+    expect(body.contents[1].role).toBe('model')
+    expect(body.contents[0].role).toBe('user')
+  })
+
+  it('drops a leading assistant turn so the payload starts on the customer', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        okResponse({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateReply({
+      config: config({ provider: 'gemini', model: 'gemini-2.0-flash' }),
+      systemPrompt: 'sys',
+      messages: [
+        { role: 'assistant', content: 'Welcome!' },
+        { role: 'user', content: 'Hi' },
+      ],
+    })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.contents[0].role).toBe('user')
+    expect(body.contents).toHaveLength(1)
+  })
+
+  it('detects handoff sentinel in Gemini output', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          candidates: [{ content: { parts: [{ text: '[[HANDOFF]]' }] } }],
+        }),
+      ),
+    )
+    const res = await generateReply({
+      config: config({ provider: 'gemini', model: 'gemini-2.0-flash' }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'I need a human' }],
+    })
+    expect(res.handoff).toBe(true)
+    expect(res.text).toBe('')
+  })
+
+  it('maps a 401 to an invalid_key AiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        errResponse(401, { error: { message: 'API key not valid.' } }),
+      ),
+    )
+    await expect(
+      generateReply({
+        config: config({ provider: 'gemini', model: 'gemini-2.0-flash' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_key', status: 401 })
+  })
+
+  it('maps a 429 to a rate_limited AiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(errResponse(429, { error: { message: 'quota exceeded' } })),
+    )
+    await expect(
+      generateReply({
+        config: config({ provider: 'gemini', model: 'gemini-2.0-flash' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({ code: 'rate_limited' })
+  })
+
+  it('throws an empty_response AiError when candidates array is empty', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(okResponse({ candidates: [] })),
+    )
+    await expect(
+      generateReply({
+        config: config({ provider: 'gemini', model: 'gemini-2.0-flash' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({ code: 'empty_response' })
+  })
+})
