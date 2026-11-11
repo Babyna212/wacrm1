@@ -140,6 +140,22 @@ BEGIN
       'idx_automation_pending_awaiting_reply is missing — migration 045 did not apply';
   END IF;
 
+  -- 060 widens ai_configs and ai_usage_log check constraints to include 'gemini'.
+  IF pg_get_constraintdef(
+       (SELECT oid FROM pg_constraint
+        WHERE conname = 'ai_configs_provider_check')
+     ) NOT LIKE '%gemini%' THEN
+    RAISE EXCEPTION
+      'ai_configs_provider_check does not allow gemini — migration 060 did not apply';
+  END IF;
+  IF pg_get_constraintdef(
+       (SELECT oid FROM pg_constraint
+        WHERE conname = 'ai_usage_log_provider_check')
+     ) NOT LIKE '%gemini%' THEN
+    RAISE EXCEPTION
+      'ai_usage_log_provider_check does not allow gemini — migration 060 did not apply';
+  END IF;
+
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public'
