@@ -49,7 +49,7 @@ const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   openai: 'sk-...',
   anthropic: 'sk-ant-...',
   openai_compatible: 'your-api-key',
-  gemini: 'AIza...',
+  gemini: 'AIza... or AQ...',
 };
 
 export function AiConfig() {

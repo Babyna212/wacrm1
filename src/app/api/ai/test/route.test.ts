@@ -100,4 +100,47 @@ describe('POST /api/ai/test stored key reuse', () => {
       { provider: 'openai_compatible', apiKey: 'new-key', baseUrl: 'https://1.1.1.1/v1' },
     ])
   })
+
+  it('accepts Gemini provider with AQ. key format', async () => {
+    const aqKey = 'AQ.TestKey123456789'
+    const res = await post({
+      provider: 'gemini',
+      model: 'gemini-3.5-flash-lite',
+      api_key: aqKey,
+    })
+    expect(res.status).toBe(200)
+    expect(h.validateCalls).toEqual([
+      { provider: 'gemini', apiKey: aqKey, baseUrl: null },
+    ])
+  })
+
+  it('reuses stored Gemini key when provider matches and key is omitted', async () => {
+    h.stored = {
+      api_key: 'stored-gemini-enc',
+      provider: 'gemini',
+      base_url: null,
+    }
+    const res = await post({
+      provider: 'gemini',
+      model: 'gemini-3.5-flash-lite',
+    })
+    expect(res.status).toBe(200)
+    expect(h.validateCalls).toEqual([
+      { provider: 'gemini', apiKey: 'plain:stored-gemini-enc', baseUrl: null },
+    ])
+  })
+
+  it('never reuses stored Gemini key when switching to OpenAI', async () => {
+    h.stored = {
+      api_key: 'stored-gemini-enc',
+      provider: 'gemini',
+      base_url: null,
+    }
+    const res = await post({
+      provider: 'openai',
+      model: 'gpt-5.4-mini',
+    })
+    expect(res.status).toBe(400)
+    expect(h.validateCalls).toHaveLength(0)
+  })
 })

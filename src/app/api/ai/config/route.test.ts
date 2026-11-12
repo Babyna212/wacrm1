@@ -134,4 +134,36 @@ describe('POST /api/ai/config stored key reuse', () => {
     ])
     expect(h.updates[0]).toMatchObject({ base_url: 'https://1.1.1.1/v1', api_key: 'enc:new-key' })
   })
+
+  it('validates and encrypts a newly entered Gemini AQ. key on save', async () => {
+    const aqKey = 'AQ.KeySaved123456789'
+    const res = await post({
+      provider: 'gemini',
+      model: 'gemini-3.5-flash-lite',
+      api_key: aqKey,
+    })
+    expect(res.status).toBe(200)
+    expect(h.validateCalls).toEqual([
+      { provider: 'gemini', apiKey: aqKey, baseUrl: null },
+    ])
+    expect(h.updates[0]).toMatchObject({
+      provider: 'gemini',
+      model: 'gemini-3.5-flash-lite',
+      api_key: `enc:${aqKey}`,
+    })
+  })
+
+  it('refuses to move a stored Gemini key to OpenAI', async () => {
+    h.stored = {
+      id: 'cfg-1',
+      provider: 'gemini',
+      model: 'gemini-3.5-flash-lite',
+      base_url: null,
+      api_key: 'enc-gemini-key',
+    }
+    const res = await post({ provider: 'openai', model: 'gpt-5.4-mini' })
+    expect(res.status).toBe(400)
+    expect(h.validateCalls).toHaveLength(0)
+    expect(h.updates).toHaveLength(0)
+  })
 })

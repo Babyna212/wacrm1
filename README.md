@@ -33,12 +33,12 @@ clone or fork it to run your own CRM.
 - **No-code automations** — triggers on inbound messages, new
   contacts, keywords, or schedule; conditional branches, waits,
   tags, webhooks. Visual builder.
-- **AI reply assistant** — bring your own OpenAI, Anthropic, Google Gemini,
-  or OpenAI-compatible key (stored encrypted; no per-seat AI fee, your data
-  stays yours). One-click AI-drafted replies in the inbox, plus an optional
-  auto-reply bot with a per-conversation cap and clean human handoff.
-  Add a **knowledge base** (FAQs, policies, product docs) and it
-  answers from your own content — hybrid retrieval (Postgres full-text,
+- **AI reply assistant** — bring your own OpenAI, Anthropic, Google Gemini
+  (defaults to `gemini-3.5-flash-lite`), or OpenAI-compatible key (stored
+  encrypted; no per-seat AI fee, your data stays yours). One-click AI-drafted
+  replies in the inbox, plus an optional auto-reply bot with a per-conversation
+  cap and clean human handoff. Add a **knowledge base** (FAQs, policies, product docs)
+  and it answers from your own content — hybrid retrieval (Postgres full-text,
   or semantic pgvector when an embeddings key is set).
 - **Real-time dashboard** — response times, daily volume, pipeline
   value, cross-module activity feed.

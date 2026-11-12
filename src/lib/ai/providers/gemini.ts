@@ -9,8 +9,7 @@ const t = getT('LibErrors')
 // Google Gemini (generateContent) adapter.
 //
 // Uses the Gemini Developer API v1beta endpoint. The caller
-// supplies their own API key (Bearer token via Authorization
-// header, which works for both API-key and OAuth tokens).
+// supplies their own API key via the native `x-goog-api-key` header.
 //
 // Mapping:
 //   system prompt  → system_instruction (role: "system")
@@ -33,12 +32,31 @@ interface GeminiContent {
   parts: GeminiPart[]
 }
 
+interface GeminiCandidate {
+  content?: {
+    parts?: GeminiPart[]
+    role?: string
+  }
+  finishReason?: string
+  safetyRatings?: Array<{
+    category?: string
+    probability?: string
+    blocked?: boolean
+  }>
+}
+
+interface GeminiPromptFeedback {
+  blockReason?: string
+  safetyRatings?: Array<{
+    category?: string
+    probability?: string
+    blocked?: boolean
+  }>
+}
+
 interface GeminiResponse {
-  candidates?: {
-    content?: {
-      parts?: GeminiPart[]
-    }
-  }[]
+  candidates?: GeminiCandidate[]
+  promptFeedback?: GeminiPromptFeedback
   usageMetadata?: {
     promptTokenCount?: number
     candidatesTokenCount?: number
@@ -70,15 +88,23 @@ function toGeminiContents(messages: ChatMessage[]): GeminiContent[] {
 
 /**
  * Call the Gemini generateContent endpoint with the caller's own
- * API key. Returns the raw assistant text + token usage (handoff
+ * API key using Google's native `x-goog-api-key` header.
+ * Returns the raw assistant text + token usage (handoff
  * parsing happens in `generateReply`).
  *
  * The endpoint pattern is:
  *   POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
- *   Authorization: Bearer {apiKey}
+ *   x-goog-api-key: {apiKey}
  */
 export async function generateGemini(args: ProviderArgs): Promise<ProviderResult> {
   const { apiKey, model, systemPrompt, messages, timeoutMs } = args
+
+  if (!apiKey || !apiKey.trim()) {
+    throw new AiError(t('ai.invalidKey', { provider: 'Gemini' }), {
+      code: 'invalid_key',
+      status: 401,
+    })
+  }
 
   const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`
 
@@ -87,7 +113,7 @@ export async function generateGemini(args: ProviderArgs): Promise<ProviderResult
     res = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        'x-goog-api-key': apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -115,15 +141,25 @@ export async function generateGemini(args: ProviderArgs): Promise<ProviderResult
       // non-JSON body — fall back to status line
     }
 
+    if (apiKey && detail.includes(apiKey)) {
+      detail = detail.replaceAll(apiKey, '[REDACTED]')
+    }
+
     const { status } = res
-    const code =
-      status === 400 && detail.toLowerCase().includes('api key')
-        ? 'invalid_key'
-        : status === 401 || status === 403
-          ? 'invalid_key'
-          : status === 429
-            ? 'rate_limited'
-            : 'provider_error'
+    const lowerDetail = detail.toLowerCase()
+    const isKeyError =
+      status === 401 ||
+      status === 403 ||
+      (status === 400 &&
+        (lowerDetail.includes('api key') ||
+          lowerDetail.includes('api_key') ||
+          lowerDetail.includes('apikey')))
+
+    const code = isKeyError
+      ? 'invalid_key'
+      : status === 429
+        ? 'rate_limited'
+        : 'provider_error'
     const base =
       code === 'invalid_key'
         ? t('ai.invalidKey', { provider: 'Gemini' })
@@ -138,8 +174,25 @@ export async function generateGemini(args: ProviderArgs): Promise<ProviderResult
   }
 
   const data = (await res.json().catch(() => null)) as GeminiResponse | null
-  const text = data?.candidates?.[0]?.content?.parts
-    ?.filter((p) => typeof p.text === 'string')
+
+  const promptBlockReason = data?.promptFeedback?.blockReason
+  if (promptBlockReason) {
+    throw new AiError(`Gemini blocked the request: ${promptBlockReason}`, {
+      code: 'safety_blocked',
+      status: 502,
+    })
+  }
+
+  const candidate = data?.candidates?.[0]
+  if (candidate?.finishReason === 'SAFETY') {
+    throw new AiError('Gemini response was blocked by safety filters.', {
+      code: 'safety_blocked',
+      status: 502,
+    })
+  }
+
+  const text = candidate?.content?.parts
+    ?.filter((p): p is { text: string } => typeof p?.text === 'string')
     .map((p) => p.text)
     .join('')
     .trim()
